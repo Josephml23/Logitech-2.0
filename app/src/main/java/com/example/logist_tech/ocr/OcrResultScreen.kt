@@ -13,6 +13,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.logist_tech.ui.theme.Logist_TechTheme
+import com.example.logist_tech.anomalias.AnomaliaManager
+import com.example.logist_tech.history.HistorialManager
+import com.example.logist_tech.history.TipoEvento
 
 /**
  * T-03 — OcrResultScreen
@@ -53,11 +56,32 @@ fun OcrResultScreen(
         // ── Resultado comparación QR vs OCR ──
         AnomaliaCard(resultado = resultado)
 
+        // ── Registrar anomalía automáticamente si hay problema ──
+        LaunchedEffect(resultado) {
+            if (resultado.hayAnomalia && resultado.tipo != "SIN_ANOMALIA") {
+                AnomaliaManager.registrarDesdeResultado(resultado)
+                HistorialManager.agregar(
+                    idCaja      = ocrData.nombre.ifBlank { "DESCONOCIDO" },
+                    producto    = ocrData.nombre.ifBlank { "Desconocido" },
+                    cantidad    = ocrData.cantidad,
+                    tipoEvento  = TipoEvento.ANOMALIA,
+                    descripcion = resultado.descripcion
+                )
+            }
+        }
+
         // ── Botón para registrar en inventario ──
         if (!resultado.hayAnomalia || resultado.tipo == "SIN_ANOMALIA") {
             Button(
                 onClick = {
                     val producto = OcrProcessor.ocrDataToProducto(ocrData)
+                    HistorialManager.agregar(
+                        idCaja      = ocrData.nombre.ifBlank { "SIN_ID" },
+                        producto    = ocrData.nombre.ifBlank { "Desconocido" },
+                        cantidad    = ocrData.cantidad,
+                        tipoEvento  = TipoEvento.INGRESO,
+                        descripcion = "Caja registrada correctamente en inventario"
+                    )
                     onRegistrarEnInventario(producto)
                 },
                 modifier = Modifier.fillMaxWidth(),

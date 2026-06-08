@@ -25,10 +25,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.logist_tech.R
-import com.example.logist_tech.models.Producto
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import com.example.logist_tech.history.HistorialManager
+import com.example.logist_tech.history.EntradaHistorial
+import com.example.logist_tech.history.TipoEvento
+import androidx.compose.runtime.derivedStateOf
 
 private val AzulLogis = Color(0xFF2980B9)
 private val AzulOscuro = Color(0xFF123B6D)
@@ -42,24 +45,19 @@ fun HistoryScreen(onNavigateBack: () -> Unit = {}) {
     var fechaSeleccionada by remember { mutableStateOf<String?>("21/05/2026") }
     var mostrarCalendario by remember { mutableStateOf(false) }
 
-    val historial = remember {
-        listOf(
-            Producto(id = "1", nombre = "Laptop Lenovo", cantidad = 5, pesoKg = 2.5,
-                categoria = "Tecnología", destino = "Lima", estado = "Correcto",
-                tipoMovimiento = "Entrada", fecha = "21/05/2026"),
-            Producto(id = "2", nombre = "Mouse Logitech", cantidad = 3, pesoKg = 0.5,
-                categoria = "Accesorios", destino = "Arequipa", estado = "Correcto",
-                tipoMovimiento = "Salida", fecha = "20/05/2026"),
-            Producto(id = "3", nombre = "Monitor Samsung", cantidad = 2, pesoKg = 4.5,
-                categoria = "Pantallas", destino = "Cusco", estado = "Anomalía",
-                tipoMovimiento = "Entrada", fecha = "19/05/2026")
-        )
-    }
+    val historial by remember { derivedStateOf { HistorialManager.historial } }
 
-    val filteredList = historial.filter { producto ->
-        (selectedFilter == null || producto.tipoMovimiento == selectedFilter) &&
-                (fechaSeleccionada == null || producto.fecha == fechaSeleccionada) &&
-                producto.nombre.contains(searchQuery, ignoreCase = true)
+    val filteredList = historial.filter { entrada ->
+        val tipoTexto = when (entrada.tipoEvento) {
+            TipoEvento.INGRESO  -> "Entrada"
+            TipoEvento.DESPACHO -> "Salida"
+            TipoEvento.ANOMALIA -> "Anomalia"
+        }
+        (selectedFilter == null || tipoTexto == selectedFilter) &&
+                (fechaSeleccionada == null || entrada.fechaHora.startsWith(
+                    fechaSeleccionada!!.split("/").reversed().joinToString("-")
+                )) &&
+                entrada.producto.contains(searchQuery, ignoreCase = true)
     }
 
     LazyColumn(
@@ -210,7 +208,7 @@ fun HistoryScreen(onNavigateBack: () -> Unit = {}) {
             }
         }
 
-        items(filteredList) { producto -> HistoryCard(producto) }
+        items(filteredList) { entrada -> HistoryCard(entrada) }
     }
 }
 
@@ -229,10 +227,21 @@ fun FilterButton(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun HistoryCard(producto: Producto) {
-    val cardColor = when (producto.estado) {
-        "Anomalía" -> Color(0xFFFFE0E0)
-        else -> Color(0xFFDCE6EF)
+fun HistoryCard(entrada: EntradaHistorial) {
+    val cardColor = when (entrada.tipoEvento) {
+        TipoEvento.ANOMALIA -> Color(0xFFFFE0E0)
+        TipoEvento.DESPACHO -> Color(0xFFFFF8E1)
+        else                -> Color(0xFFDCE6EF)
+    }
+    val tipoTexto = when (entrada.tipoEvento) {
+        TipoEvento.INGRESO  -> "Entrada"
+        TipoEvento.DESPACHO -> "Salida"
+        TipoEvento.ANOMALIA -> "Anomalía"
+    }
+    val tipoColor = when (entrada.tipoEvento) {
+        TipoEvento.INGRESO  -> Color(0xFF2E7D32)
+        TipoEvento.DESPACHO -> Color(0xFFC62828)
+        TipoEvento.ANOMALIA -> Color(0xFFE65100)
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -248,16 +257,16 @@ fun HistoryCard(producto: Producto) {
                 contentDescription = null, tint = Color.DarkGray)
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = producto.nombre, fontSize = 16.sp,
+                Text(text = entrada.producto, fontSize = 16.sp,
                     fontWeight = FontWeight.Medium, color = Color.Black)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "Fecha: ${producto.fecha}", fontSize = 13.sp, color = Color.DarkGray)
+                Text(text = "Fecha: ${entrada.fechaHora}", fontSize = 13.sp, color = Color.DarkGray)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = producto.tipoMovimiento,
-                    fontSize = 13.sp,
-                    color = if (producto.tipoMovimiento == "Entrada") Color(0xFF2E7D32) else Color(0xFFC62828)
-                )
+                Text(text = tipoTexto, fontSize = 13.sp, color = tipoColor)
+                if (entrada.descripcion.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = entrada.descripcion, fontSize = 12.sp, color = Color.Gray)
+                }
             }
             Icon(imageVector = Icons.Default.MoreVert,
                 contentDescription = null, tint = Color.DarkGray)
