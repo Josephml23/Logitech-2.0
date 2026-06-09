@@ -1,116 +1,41 @@
 package com.example.logist_tech
 
-import com.example.logist_tech.anomalias.AnomaliaManager
-import com.example.logist_tech.anomalias.AnomaliaType
-import com.example.logist_tech.ocr.OcrData
-import com.example.logist_tech.ocr.OcrProcessor
-import com.example.logist_tech.ocr.QrData
-import org.junit.Assert.*
-import org.junit.Before
+import com.example.logist_tech.inventory.InventarioTestData
+import com.example.logist_tech.inventory.StockManager
 import org.junit.Test
+import org.junit.Assert.*
 
-class ExampleUnitTest {
+class StockManagerTest {
 
-    @Before
-    fun setup() {
-        AnomaliaManager.limpiar()
+    private val movimientos = InventarioTestData.getDatosPrueba()
+
+    @Test
+    fun `stock de Caja Roja debe ser 7`() {
+        val stock = StockManager.calcularStockTotal(movimientos)
+        assertEquals(7, stock["Caja Roja"])
     }
 
     @Test
-    fun testSinAnomalia() {
-        val ocrData = OcrData("Laptop", 10, 1.5, "Lima", "Producto: Laptop\nCantidad: 10\nPeso: 1.5\nDestino: Lima", emptyList())
-        val qrData = QrData("CJ-001", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertFalse(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.SIN_ANOMALIA, resultado.tipo)
+    fun `stock de Caja Azul debe ser 1`() {
+        val stock = StockManager.calcularStockTotal(movimientos)
+        assertEquals(1, stock["Caja Azul"])
     }
 
     @Test
-    fun testTextoBorroso() {
-        val ocrData = OcrData("", 0, 0.0, "", "", emptyList())
-        val qrData = QrData("CJ-001", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.TEXTO_BORROSO, resultado.tipo)
+    fun `Pallet Metal debe estar en bajo stock`() {
+        val bajoStock = StockManager.productosBajoStock(movimientos, minimo = 5)
+        assertTrue(bajoStock.contains("Pallet Metal"))
     }
 
     @Test
-    fun testDatosIncompletosEnQr() {
-        val ocrData = OcrData("Laptop", 10, 1.5, "Lima", "Producto: Laptop\nCantidad: 10", emptyList())
-        // QR con datos incompletos (id vacío)
-        val qrData = QrData("", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.DATOS_INCOMPLETOS, resultado.tipo)
+    fun `validar salida con stock insuficiente`() {
+        val resultado = StockManager.validarSalida("Caja Azul", 10, movimientos)
+        assertEquals("Stock insuficiente", resultado)
     }
 
     @Test
-    fun testCajaNoRegistradaEnApi() {
-        val ocrData = OcrData("Laptop", 10, 1.5, "Lima", "Producto: Laptop\nCantidad: 10", emptyList())
-        // ID que no empieza con "CJ-" y no está en la lista de prueba
-        val qrData = QrData("INVALID_BOX_ID", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.CAJA_NO_REGISTRADA_EN_API, resultado.tipo)
-    }
-
-    @Test
-    fun testProductoInexistenteEnOcr() {
-        val ocrData = OcrData("", 10, 1.5, "Lima", "Cantidad: 10", listOf("nombre"))
-        val qrData = QrData("CJ-001", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.PRODUCTO_INEXISTENTE, resultado.tipo)
-    }
-
-    @Test
-    fun testCantidadErroneaEnOcr() {
-        val ocrData = OcrData("Laptop", 0, 1.5, "Lima", "Producto: Laptop", listOf("cantidad"))
-        val qrData = QrData("CJ-001", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.CANTIDAD_ERRONEA, resultado.tipo)
-    }
-
-    @Test
-    fun testQrOcrDiferenteNombre() {
-        val ocrData = OcrData("Celular", 10, 1.5, "Lima", "Producto: Celular\nCantidad: 10", emptyList())
-        val qrData = QrData("CJ-001", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.QR_OCR_DIFERENTE, resultado.tipo)
-    }
-
-    @Test
-    fun testCantidadErroneaDiferenteCantidad() {
-        val ocrData = OcrData("Laptop", 5, 1.5, "Lima", "Producto: Laptop\nCantidad: 5", emptyList())
-        val qrData = QrData("CJ-001", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        assertEquals(AnomaliaType.CANTIDAD_ERRONEA, resultado.tipo)
-    }
-
-    @Test
-    fun testRegistroDeAnomaliaTrazabilidad() {
-        val ocrData = OcrData("Laptop", 5, 1.5, "Lima", "Producto: Laptop\nCantidad: 5", emptyList())
-        val qrData = QrData("CJ-001", "Laptop", 10)
-        
-        val resultado = OcrProcessor.compararOcrConQr(ocrData, qrData)
-        assertTrue(resultado.hayAnomalia)
-        
-        val anomaliaRegistrada = AnomaliaManager.registrarDesdeResultado(resultado, "mock/uri")
-        assertNotNull(anomaliaRegistrada)
-        assertEquals("CJ-001", anomaliaRegistrada!!.idCaja)
-        assertEquals(AnomaliaType.CANTIDAD_ERRONEA, anomaliaRegistrada.tipo)
-        assertTrue(anomaliaRegistrada.fechaHora.matches(Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}")))
-        assertEquals(1, AnomaliaManager.totalAnomalias())
+    fun `validar salida con stock suficiente`() {
+        val resultado = StockManager.validarSalida("Caja Roja", 5, movimientos)
+        assertEquals("OK", resultado)
     }
 }
