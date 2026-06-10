@@ -41,7 +41,7 @@ object AnomaliaManager {
             tipo             = resultado.tipo,
             descripcion      = resultado.descripcion,
             prioridad        = resultado.prioridad,
-            productoNombre   = resultado.ocrData.nombre.ifBlank { "Desconocido" },
+            productoNombre   = resultado.ocrData.nombre.ifBlank { resultado.qrData?.nombre ?: "Desconocido" },
             textoOcrOriginal = resultado.ocrData.textoOriginal,
             evidenciaUri     = evidenciaUri
         )

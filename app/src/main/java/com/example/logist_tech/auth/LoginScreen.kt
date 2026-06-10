@@ -55,10 +55,19 @@ fun LoginScreen(
                 nombre = it
                 errorVisible = false
             },
-            label = { Text("Nombre de usuario") },
+            label = { Text("Nombre de usuario", color = Color(0xFF2980B9)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor        = Color(0xFF111111),
+                unfocusedTextColor      = Color(0xFF111111),
+                focusedContainerColor   = Color.White,
+                unfocusedContainerColor = Color.White,
+                focusedBorderColor      = Color(0xFF2980B9),
+                unfocusedBorderColor    = Color(0xFFBBBBBB),
+                cursorColor             = Color(0xFF2980B9)
+            )
         )
 
         if (errorVisible) {

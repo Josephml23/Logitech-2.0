@@ -22,15 +22,15 @@ object OcrProcessor {
      * Formatos de texto aceptados (insensible a mayúsculas):
      *   Producto: Coca Cola
      *   Cantidad: 24
-     *   Peso: 1.5
+     *   Peso: 1.5        ← opcional, no genera campoFaltante si no aparece
      *   Destino: Lima
      *
-     * Si un campo no se encuentra, se registra en [OcrData.camposFaltantes].
+     * Si un campo obligatorio no se encuentra, se registra en [OcrData.camposFaltantes].
+     * El peso NO es obligatorio — su ausencia no se penaliza.
      */
     fun parsearTextoOcr(textoOcr: String): OcrData {
         val camposFaltantes = mutableListOf<String>()
 
-        // Normalizar: quitar espacios extra, convertir a minúsculas para búsqueda
         val lineas = textoOcr.lines().map { it.trim() }
 
         val nombre   = extraerCampoTexto(lineas, listOf("producto", "nombre", "item"))
@@ -38,9 +38,9 @@ object OcrProcessor {
         val peso     = extraerCampoNumeroDecimal(lineas, listOf("peso", "kg", "weight"))
         val destino  = extraerCampoTexto(lineas, listOf("destino", "destination", "para"))
 
+        // El peso es opcional — no se agrega a camposFaltantes
         if (nombre.isBlank())  camposFaltantes.add("nombre")
         if (cantidad == 0)     camposFaltantes.add("cantidad")
-        if (peso == 0.0)       camposFaltantes.add("pesoKg")
         if (destino.isBlank()) camposFaltantes.add("destino")
 
         return OcrData(
@@ -59,10 +59,7 @@ object OcrProcessor {
             val lineaLower = linea.lowercase()
             for (clave in claves) {
                 if (lineaLower.startsWith(clave)) {
-                    // Extraer lo que viene después de ":" o de la clave misma
-                    val valor = linea
-                        .substringAfter(":", "")
-                        .trim()
+                    val valor = linea.substringAfter(":", "").trim()
                     if (valor.isNotBlank()) return valor
                 }
             }
@@ -73,7 +70,6 @@ object OcrProcessor {
     /** Busca un valor numérico entero (ej: cantidad). */
     private fun extraerCampoNumeroEntero(lineas: List<String>, claves: List<String>): Int {
         val texto = extraerCampoTexto(lineas, claves)
-        // Extrae solo los dígitos del valor encontrado
         return Regex("\\d+").find(texto)?.value?.toIntOrNull() ?: 0
     }
 
@@ -89,39 +85,39 @@ object OcrProcessor {
 
     /**
      * Parsea el JSON del código QR en un [QrData].
-     * Formato esperado: {"producto":"Laptop","cantidad":10}
+     * Formato completo: {"idCaja":"CJ-001","producto":"Laptop","cantidad":10,"destino":"Lima","peso":1.5}
      * Retorna null si el QR no tiene el formato correcto o está vacío.
      */
     fun parsearQr(qrJson: String): QrData? {
         if (qrJson.isBlank() || qrJson == "Esperando código QR...") return null
         return try {
-            val json     = JSONObject(qrJson)
-            val idCaja   = when {
+            val json = JSONObject(qrJson)
+            val idCaja = when {
                 json.has("idCaja") -> json.getString("idCaja")
-                json.has("id") -> json.getString("id")
-                else -> ""
+                json.has("id")     -> json.getString("id")
+                else               -> ""
             }.trim()
             val nombre   = json.optString("producto", "").trim()
             val cantidad = json.optInt("cantidad", 0)
-            
-            // Retorna QrData si es JSON válido para evaluar campos incompletos
-            QrData(idCaja = idCaja, nombre = nombre, cantidad = cantidad)
+            val destino  = json.optString("destino", "").trim()
+            val pesoKg   = json.optDouble("peso", 0.0)
+            QrData(idCaja = idCaja, nombre = nombre, cantidad = cantidad, destino = destino, pesoKg = pesoKg)
         } catch (e: Exception) {
-            // El QR no es JSON válido
             null
         }
     }
 
     /**
-     * Valida de manera lógica si el identificador de la caja está registrado en la API.
-     * 
+     * Valida si el identificador de la caja está registrado en la API.
+     *
      * NOTA PARA EL ENCARGADO DEL BLOQUE E:
-     * Para conectar con la API real (http://38.250.116.214:80/api/v1/cajas), se debe reemplazar
-     * esta simulación lógica por una llamada de red síncrona/asíncrona (usando Retrofit u okhttp).
-     * Por ahora, se valida lógicamente:
-     *  - Se consideran válidos los IDs que comiencen con "CJ-" (ej. CJ-001, CJ-002, etc.).
-     *  - También se acepta una lista de IDs de prueba predefinidos ("1", "2", "3", "4", "BOX-001", "BOX-002").
-     *  - Cualquier otro ID simula una respuesta HTTP 404 (retornando false).
+     * Reemplazar esta simulación por una llamada real a:
+     *   GET http://38.250.116.214/api/v1/cajas/{id}
+     * Si retorna 404 → false. Si retorna 200 → true.
+     *
+     * Por ahora se acepta:
+     *  - IDs que comiencen con "CJ-" (ej. CJ-001, CJ-002)
+     *  - Lista de prueba predefinida
      */
     fun esCajaRegistradaEnApi(idCaja: String): Boolean {
         if (idCaja.isBlank()) return false
@@ -135,12 +131,62 @@ object OcrProcessor {
 
     /**
      * Compara los datos extraídos del OCR con los del QR y detecta anomalías.
-     * Este resultado se pasa al módulo de Anomalías (T-04).
+     *
+     * Tipos de anomalía posibles (ver AnomaliaType):
+     *  - TEXTO_BORROSO           → OCR vacío Y sin QR válido
+     *  - DATOS_INCOMPLETOS       → QR presente pero faltan campos obligatorios
+     *  - CAJA_NO_REGISTRADA_EN_API → ID de caja no existe en la API
+     *  - PRODUCTO_INEXISTENTE    → OCR no detectó nombre de producto
+     *  - CANTIDAD_ERRONEA        → Cantidad inválida o diferente entre QR y OCR
+     *  - QR_OCR_DIFERENTE        → Nombre de producto no coincide
+     *  - SIN_ANOMALIA            → Todo OK
      */
     fun compararOcrConQr(ocrData: OcrData, qrData: QrData?): ResultadoComparacion {
 
-        // Caso 1: El OCR no pudo leer nada (documento borroso o fuera de foco)
+        // ── Caso 1: OCR vacío → modo QR puro ─────────────────────────
         if (ocrData.textoOriginal.isBlank()) {
+            if (qrData != null) {
+                // Validar campos obligatorios: id, producto, cantidad y destino.
+                // Sin destino no sabemos adónde va la caja → no se puede registrar.
+                val faltantes = mutableListOf<String>()
+                if (qrData.idCaja.isBlank())  faltantes.add("id")
+                if (qrData.nombre.isBlank())  faltantes.add("producto")
+                if (qrData.cantidad <= 0)     faltantes.add("cantidad")
+                if (qrData.destino.isBlank()) faltantes.add("destino")
+
+                if (faltantes.isNotEmpty()) {
+                    return ResultadoComparacion(
+                        hayAnomalia = true,
+                        tipo        = AnomaliaType.DATOS_INCOMPLETOS,
+                        descripcion = "El QR tiene campos obligatorios vacíos: ${faltantes.joinToString(", ")}.",
+                        prioridad   = "ALTA",
+                        ocrData     = ocrData,
+                        qrData      = qrData
+                    )
+                }
+
+                // Verificar registro en API
+                if (!esCajaRegistradaEnApi(qrData.idCaja)) {
+                    return ResultadoComparacion(
+                        hayAnomalia = true,
+                        tipo        = AnomaliaType.CAJA_NO_REGISTRADA_EN_API,
+                        descripcion = "La caja '${qrData.idCaja}' no está registrada en la API (Error 404).",
+                        prioridad   = "ALTA",
+                        ocrData     = ocrData,
+                        qrData      = qrData
+                    )
+                }
+
+                return ResultadoComparacion(
+                    hayAnomalia = false,
+                    tipo        = AnomaliaType.SIN_ANOMALIA,
+                    descripcion = "✅ Código QR leído correctamente. Todos los campos presentes.",
+                    prioridad   = "BAJA",
+                    ocrData     = ocrData,
+                    qrData      = qrData
+                )
+            }
+            // Sin QR válido y OCR vacío → documento ilegible
             return ResultadoComparacion(
                 hayAnomalia = true,
                 tipo        = AnomaliaType.TEXTO_BORROSO,
@@ -151,9 +197,9 @@ object OcrProcessor {
             )
         }
 
-        // Caso 2: Validación de Datos Incompletos
-        // Si el QR está presente y le falta algún campo obligatorio (id/idCaja, producto/nombre, cantidad)
-        val qrIncompleto = qrData != null && (qrData.idCaja.isBlank() || qrData.nombre.isBlank() || qrData.cantidad <= 0)
+        // ── Caso 2: QR con campos obligatorios faltantes ──────────────
+        val qrIncompleto = qrData != null &&
+                (qrData.idCaja.isBlank() || qrData.nombre.isBlank() || qrData.cantidad <= 0)
         if (qrIncompleto) {
             return ResultadoComparacion(
                 hayAnomalia = true,
@@ -165,7 +211,7 @@ object OcrProcessor {
             )
         }
 
-        // Caso 3: Validación de la API (Caja no registrada -> Error 404)
+        // ── Caso 3: ID de caja no registrado en la API (simul. 404) ───
         if (qrData != null && !esCajaRegistradaEnApi(qrData.idCaja)) {
             return ResultadoComparacion(
                 hayAnomalia = true,
@@ -177,7 +223,7 @@ object OcrProcessor {
             )
         }
 
-        // Caso 4: No se detectó nombre de producto en el OCR (PRODUCTO_INEXISTENTE)
+        // ── Caso 4: No se detectó nombre de producto en el OCR ────────
         if (ocrData.nombre.isBlank()) {
             return ResultadoComparacion(
                 hayAnomalia = true,
@@ -189,7 +235,7 @@ object OcrProcessor {
             )
         }
 
-        // Caso 5: No se detectó cantidad o valor inválido en el OCR (CANTIDAD_ERRONEA)
+        // ── Caso 5: Cantidad inválida en el OCR ───────────────────────
         if (ocrData.cantidad <= 0) {
             return ResultadoComparacion(
                 hayAnomalia = true,
@@ -201,7 +247,7 @@ object OcrProcessor {
             )
         }
 
-        // Si no hay QR para comparar, no hay más anomalías que reportar
+        // ── Sin QR para comparar → OCR solo, sin anomalía ─────────────
         if (qrData == null) {
             return ResultadoComparacion(
                 hayAnomalia = false,
@@ -213,7 +259,7 @@ object OcrProcessor {
             )
         }
 
-        // Caso 6: El nombre del producto no coincide entre QR y OCR (QR_OCR_DIFERENTE)
+        // ── Caso 6: Nombre no coincide entre QR y OCR ─────────────────
         val nombreOcrNorm = ocrData.nombre.trim().lowercase()
         val nombreQrNorm  = qrData.nombre.trim().lowercase()
         if (!nombreOcrNorm.contains(nombreQrNorm) && !nombreQrNorm.contains(nombreOcrNorm)) {
@@ -227,7 +273,7 @@ object OcrProcessor {
             )
         }
 
-        // Caso 7: La cantidad no coincide entre QR y OCR (CANTIDAD_ERRONEA)
+        // ── Caso 7: Cantidad diferente entre QR y OCR ─────────────────
         if (qrData.cantidad != ocrData.cantidad) {
             return ResultadoComparacion(
                 hayAnomalia = true,
@@ -239,7 +285,7 @@ object OcrProcessor {
             )
         }
 
-        // Todo coincide → sin anomalía
+        // ── Todo OK ────────────────────────────────────────────────────
         return ResultadoComparacion(
             hayAnomalia = false,
             tipo        = AnomaliaType.SIN_ANOMALIA,
@@ -251,27 +297,34 @@ object OcrProcessor {
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // 4. CONVERTIR OcrData → Producto (para conectar con StockManager)
+    // 4. CONVERTIR OcrData → Producto (para StockManager / InventarioManager)
     // ─────────────────────────────────────────────────────────────────
 
     /**
      * Convierte un [OcrData] en un [com.example.logist_tech.models.Producto]
-     * listo para ser registrado en el inventario (T-05/T-06).
+     * listo para ser registrado en el inventario.
+     * Si el OCR no trajo datos pero hay QR, usa los datos del QR como respaldo.
      */
     fun ocrDataToProducto(
         ocrData: OcrData,
+        qrData: QrData? = null,
         tipoMovimiento: String = "ENTRADA"
     ): com.example.logist_tech.models.Producto {
+        val nombre  = ocrData.nombre.ifBlank  { qrData?.nombre  ?: "Desconocido" }
+        val cantidad = if (ocrData.cantidad > 0) ocrData.cantidad else (qrData?.cantidad ?: 0)
+        val peso    = if (ocrData.pesoKg > 0.0)  ocrData.pesoKg  else (qrData?.pesoKg  ?: 0.0)
+        val destino = ocrData.destino.ifBlank { qrData?.destino ?: "Sin destino" }
+
         return com.example.logist_tech.models.Producto(
             id             = System.currentTimeMillis().toString(),
-            nombre         = ocrData.nombre.ifBlank { "Desconocido" },
-            cantidad       = ocrData.cantidad,
-            pesoKg         = ocrData.pesoKg,
+            nombre         = nombre,
+            cantidad       = cantidad,
+            pesoKg         = peso,
             categoria      = "General",
-            destino        = ocrData.destino.ifBlank { "Sin destino" },
+            destino        = destino,
             estado         = if (ocrData.camposFaltantes.isEmpty()) "ok" else "incompleto",
             tipoMovimiento = tipoMovimiento,
-            fecha = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            fecha          = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
                 .format(java.util.Date())
         )
     }

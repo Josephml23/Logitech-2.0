@@ -10,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Inventory
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -20,13 +19,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.logist_tech.R
 import com.example.logist_tech.models.Producto
-import com.example.logist_tech.ui.theme.Logist_TechTheme
 
 private val AzulLogis   = Color(0xFF2980B9)
 private val FondoBlanco = Color(0xFFFFFFFF)
@@ -38,7 +35,10 @@ private val GrisTexto   = Color(0xFF888888)
 fun InventarioScreen(
     onNavigateBack: () -> Unit = {}
 ) {
-    var movimientos    by remember { mutableStateOf(InventarioTestData.getDatosPrueba()) }
+    // FIX: ticker para forzar relectura cuando se agrega desde OcrResultScreen
+    var reloadTick by remember { mutableStateOf(0) }
+    val movimientos = remember(reloadTick) { InventarioManager.movimientos }
+
     var mostrarDialogo by remember { mutableStateOf(false) }
 
     val stockActual    = StockManager.calcularStockTotal(movimientos)
@@ -51,23 +51,19 @@ fun InventarioScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // ── Botón atrás ──
             IconButton(
-                onClick = onNavigateBack,
+                onClick  = onNavigateBack,
                 modifier = Modifier.padding(start = 8.dp, top = 16.dp)
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Volver",
-                    tint = Color(0xFFE67E22) // naranja como el mockup
+                    tint = Color(0xFFE67E22)
                 )
             }
 
-            // ── Logo ──
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -79,18 +75,16 @@ fun InventarioScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // ── Título "Inventario:" en azul ──
             Text(
-                text = "Inventario:",
+                text     = "Inventario:",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
-                color = AzulLogis,
+                color    = AzulLogis,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // ── Lista ──
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
@@ -107,24 +101,18 @@ fun InventarioScreen(
                         destino    = detalle?.destino ?: "—",
                         bajoBstock = esBajo,
                         onEntrada  = {
-                            movimientos = movimientos + Producto(
-                                id = System.currentTimeMillis().toString(),
-                                nombre = entry.key, cantidad = 1, pesoKg = 0.0,
-                                categoria = detalle?.categoria ?: "",
-                                destino = detalle?.destino ?: "",
-                                estado = "ok", tipoMovimiento = "ENTRADA",
-                                fecha = java.time.LocalDate.now().toString()
+                            InventarioManager.agregarMovimiento(
+                                entry.key, 1, "ENTRADA",
+                                detalle?.categoria ?: "", detalle?.destino ?: ""
                             )
+                            reloadTick++
                         },
                         onSalida = {
-                            movimientos = movimientos + Producto(
-                                id = System.currentTimeMillis().toString(),
-                                nombre = entry.key, cantidad = 1, pesoKg = 0.0,
-                                categoria = detalle?.categoria ?: "",
-                                destino = detalle?.destino ?: "",
-                                estado = "ok", tipoMovimiento = "SALIDA",
-                                fecha = java.time.LocalDate.now().toString()
+                            InventarioManager.agregarMovimiento(
+                                entry.key, 1, "SALIDA",
+                                detalle?.categoria ?: "", detalle?.destino ?: ""
                             )
+                            reloadTick++
                         }
                     )
                 }
@@ -132,14 +120,11 @@ fun InventarioScreen(
             }
         }
 
-        // ── FAB ──
         FloatingActionButton(
-            onClick = { mostrarDialogo = true },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(24.dp),
+            onClick        = { mostrarDialogo = true },
+            modifier       = Modifier.align(Alignment.BottomEnd).padding(24.dp),
             containerColor = AzulLogis,
-            contentColor = Color.White
+            contentColor   = Color.White
         ) {
             Icon(Icons.Default.Add, contentDescription = "Nuevo producto")
         }
@@ -149,16 +134,13 @@ fun InventarioScreen(
         RegistroMovimientoDialog(
             onDismiss   = { mostrarDialogo = false },
             onConfirmar = { nuevo ->
-                movimientos = movimientos + nuevo
+                InventarioManager.agregar(nuevo)
+                reloadTick++
                 mostrarDialogo = false
             }
         )
     }
 }
-
-// ─────────────────────────────────────────────
-// ITEM — ícono · nombre/subtexto · stock · menú ⋮
-// ─────────────────────────────────────────────
 
 @Composable
 fun ProductoItem(
@@ -171,9 +153,9 @@ fun ProductoItem(
     onSalida: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = ItemCrema),
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = ItemCrema),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
@@ -182,7 +164,6 @@ fun ProductoItem(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Ícono circular
             Box(
                 modifier = Modifier
                     .size(38.dp)
@@ -194,70 +175,39 @@ fun ProductoItem(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = if (bajoBstock) Icons.Default.Warning
-                    else Icons.Default.Inventory,
+                    imageVector = if (bajoBstock) Icons.Default.Warning else Icons.Default.Inventory,
                     contentDescription = null,
-                    tint = if (bajoBstock) Color(0xFFE53935) else AzulLogis,
+                    tint     = if (bajoBstock) Color(0xFFE53935) else AzulLogis,
                     modifier = Modifier.size(20.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            // Nombre y subtexto
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = nombre,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    color = TextoOscuro
-                )
-                Text(
-                    text = "$categoria · $destino",
-                    fontSize = 12.sp,
-                    color = GrisTexto
-                )
+                Text(nombre, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = TextoOscuro)
+                Text("$categoria · $destino", fontSize = 12.sp, color = GrisTexto)
             }
 
-            // Stock
             Text(
-                text = "$stock u.",
+                text       = "$stock u.",
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                color = if (bajoBstock) Color(0xFFE53935) else TextoOscuro,
-                modifier = Modifier.padding(end = 4.dp)
+                fontSize   = 14.sp,
+                color      = if (bajoBstock) Color(0xFFE53935) else TextoOscuro,
+                modifier   = Modifier.padding(end = 4.dp)
             )
 
-            // Botones + y -
-            IconButton(
-                onClick = onSalida,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Default.Remove,
-                    contentDescription = "Salida",
-                    tint = Color(0xFFE53935),
-                    modifier = Modifier.size(18.dp)
-                )
+            IconButton(onClick = onSalida, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Remove, contentDescription = "Salida",
+                    tint = Color(0xFFE53935), modifier = Modifier.size(18.dp))
             }
-            IconButton(
-                onClick = onEntrada,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "Entrada",
-                    tint = Color(0xFF2E7D32),
-                    modifier = Modifier.size(18.dp)
-                )
+            IconButton(onClick = onEntrada, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Add, contentDescription = "Entrada",
+                    tint = Color(0xFF2E7D32), modifier = Modifier.size(18.dp))
             }
         }
     }
 }
-
-// ─────────────────────────────────────────────
-// DIÁLOGO
-// ─────────────────────────────────────────────
 
 @Composable
 fun RegistroMovimientoDialog(
@@ -273,20 +223,16 @@ fun RegistroMovimientoDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
-            shape = RoundedCornerShape(20.dp),
+            shape    = RoundedCornerShape(20.dp),
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors   = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    "Registrar movimiento",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = TextoOscuro
-                )
+                Text("Registrar movimiento", fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp, color = TextoOscuro)
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("ENTRADA", "SALIDA").forEach { tipo ->
@@ -296,8 +242,7 @@ fun RegistroMovimientoDialog(
                             label    = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = if (tipo == "ENTRADA") Icons.Default.Add
-                                        else Icons.Default.Remove,
+                                        imageVector = if (tipo == "ENTRADA") Icons.Default.Add else Icons.Default.Remove,
                                         contentDescription = null,
                                         modifier = Modifier.size(14.dp)
                                     )
@@ -306,44 +251,33 @@ fun RegistroMovimientoDialog(
                                 }
                             },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = if (tipo == "ENTRADA") AzulLogis
-                                else Color(0xFFE53935),
-                                selectedLabelColor = Color.White
+                                selectedContainerColor = if (tipo == "ENTRADA") AzulLogis else Color(0xFFE53935),
+                                selectedLabelColor     = Color.White
                             )
                         )
                     }
                 }
 
-                OutlinedTextField(
-                    value = nombre, onValueChange = { nombre = it },
+                OutlinedTextField(value = nombre, onValueChange = { nombre = it },
                     label = { Text("Nombre del producto") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
-                )
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
                 OutlinedTextField(
                     value = cantidad,
                     onValueChange = { cantidad = it.filter { c -> c.isDigit() } },
                     label = { Text("Cantidad") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
-                )
-                OutlinedTextField(
-                    value = categoria, onValueChange = { categoria = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(value = categoria, onValueChange = { categoria = it },
                     label = { Text("Categoría") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
-                )
-                OutlinedTextField(
-                    value = destino, onValueChange = { destino = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(value = destino, onValueChange = { destino = it },
                     label = { Text("Destino") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
-                )
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
 
                 if (errorMsg != null) {
                     Text(errorMsg!!, color = Color(0xFFE53935), fontSize = 12.sp)
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancelar") }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
@@ -374,13 +308,5 @@ fun RegistroMovimientoDialog(
                 }
             }
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun InventarioScreenPreview() {
-    Logist_TechTheme {
-        InventarioScreen()
     }
 }

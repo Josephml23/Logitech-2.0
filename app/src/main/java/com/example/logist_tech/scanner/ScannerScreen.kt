@@ -9,6 +9,7 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -26,12 +27,16 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import android.graphics.BitmapFactory
+import java.io.File
 import java.util.concurrent.Executors
 
 enum class ScanMode { QR, OCR }
 
 @Composable
-fun ScannerScreen() {
+fun ScannerScreen(
+    onNavigarResultado: () -> Unit = {}
+) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
 
@@ -39,10 +44,18 @@ fun ScannerScreen() {
     var scanMode by remember { mutableStateOf(ScanMode.QR) }
     var imageCaptureUseCase by remember { mutableStateOf<ImageCapture?>(null) }
     var procesandoFoto by remember { mutableStateOf(false) }
+    var yaNavego by remember { mutableStateOf(false) }
+    var qrDetectado by remember { mutableStateOf("") }
 
-    // Estados del HUD original
-    var detectedQrCode by remember { mutableStateOf("Esperando código QR...") }
-    var detectedOcrText by remember { mutableStateOf("Esperando texto logístico...") }
+    // FIX: limpiar el holder completo al entrar al scanner
+    // Así nunca se muestra una foto de un escaneo anterior
+    LaunchedEffect(Unit) {
+        ScannerResultHolder.textoOcr = ""
+        ScannerResultHolder.textoQr = ""
+        ScannerResultHolder.imagenBitmap = null
+        yaNavego = false
+        qrDetectado = ""
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -50,6 +63,16 @@ fun ScannerScreen() {
 
     LaunchedEffect(Unit) {
         permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    LaunchedEffect(qrDetectado) {
+        if (qrDetectado.isNotBlank() && !yaNavego) {
+            yaNavego = true
+            ScannerResultHolder.textoQr = qrDetectado
+            ScannerResultHolder.textoOcr = ""
+            ScannerResultHolder.imagenBitmap = null  // FIX: nunca pasar foto al modo QR
+            onNavigarResultado()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -71,7 +94,6 @@ fun ScannerScreen() {
                         val imageCapture = ImageCapture.Builder().build()
                         imageCaptureUseCase = imageCapture
 
-                        val ocrRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                         val barcodeScanner = BarcodeScanning.getClient()
 
                         val imageAnalysis = ImageAnalysis.Builder()
@@ -79,17 +101,13 @@ fun ScannerScreen() {
                             .build()
 
                         imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                            if (scanMode == ScanMode.QR) {
-                                // Solo QR activo — evita el conflicto
-                                processImageProxy(
-                                    imageProxy = imageProxy,
-                                    ocrRecognizer = ocrRecognizer,
+                            if (scanMode == ScanMode.QR && !yaNavego) {
+                                procesarQR(
+                                    imageProxy     = imageProxy,
                                     barcodeScanner = barcodeScanner,
-                                    onQrDetected = { qrText -> detectedQrCode = qrText },
-                                    onTextDetected = { ocrText -> detectedOcrText = ocrText }
+                                    onQrDetected   = { qrText -> qrDetectado = qrText }
                                 )
                             } else {
-                                // En modo OCR no procesamos frames en tiempo real
                                 imageProxy.close()
                             }
                         }
@@ -105,7 +123,7 @@ fun ScannerScreen() {
                                 imageAnalysis
                             )
                         } catch (e: Exception) {
-                            Log.e("CameraX", "Error al iniciar cámara con escáner", e)
+                            Log.e("CameraX", "Error al iniciar camara", e)
                         }
                     }, ContextCompat.getMainExecutor(ctx))
 
@@ -114,7 +132,7 @@ fun ScannerScreen() {
                 modifier = Modifier.fillMaxSize()
             )
 
-            // ── Selector QR / OCR arriba ──
+            // Selector QR / OCR arriba
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -123,28 +141,70 @@ fun ScannerScreen() {
                 horizontalArrangement = Arrangement.Center
             ) {
                 Button(
-                    onClick = { scanMode = ScanMode.QR },
+                    onClick = {
+                        scanMode = ScanMode.QR
+                        yaNavego = false
+                        qrDetectado = ""
+                        // FIX: limpiar bitmap al cambiar a QR
+                        ScannerResultHolder.imagenBitmap = null
+                        ScannerResultHolder.textoOcr = ""
+                        ScannerResultHolder.textoQr = ""
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (scanMode == ScanMode.QR) Color(0xFF2980B9) else Color.Gray
                     ),
                     shape = RoundedCornerShape(topStart = 50.dp, bottomStart = 50.dp),
                     modifier = Modifier.width(120.dp)
                 ) {
-                    Text("📱 QR", color = Color.White)
+                    Text("QR", color = Color.White)
                 }
                 Button(
-                    onClick = { scanMode = ScanMode.OCR },
+                    onClick = {
+                        scanMode = ScanMode.OCR
+                        // FIX: limpiar QR al cambiar a OCR
+                        qrDetectado = ""
+                        yaNavego = false
+                        ScannerResultHolder.textoQr = ""
+                        ScannerResultHolder.textoOcr = ""
+                        ScannerResultHolder.imagenBitmap = null
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (scanMode == ScanMode.OCR) Color(0xFF2980B9) else Color.Gray
                     ),
                     shape = RoundedCornerShape(topEnd = 50.dp, bottomEnd = 50.dp),
                     modifier = Modifier.width(120.dp)
                 ) {
-                    Text("🔍 OCR", color = Color.White)
+                    Text("OCR", color = Color.White)
                 }
             }
 
-            // ── HUD inferior ──
+            // Recuadro de enfoque QR
+            if (scanMode == ScanMode.QR) {
+                Box(
+                    modifier = Modifier
+                        .size(260.dp)
+                        .align(Alignment.Center)
+                ) {
+                    val cornerColor = if (qrDetectado.isNotBlank()) Color(0xFF4CAF50) else Color.White
+                    val cornerSize  = 24.dp
+                    val cornerWidth = 4.dp
+
+                    Box(modifier = Modifier.size(cornerSize).align(Alignment.TopStart)
+                        .border(width = cornerWidth, color = cornerColor,
+                            shape = RoundedCornerShape(topStart = 8.dp)))
+                    Box(modifier = Modifier.size(cornerSize).align(Alignment.TopEnd)
+                        .border(width = cornerWidth, color = cornerColor,
+                            shape = RoundedCornerShape(topEnd = 8.dp)))
+                    Box(modifier = Modifier.size(cornerSize).align(Alignment.BottomStart)
+                        .border(width = cornerWidth, color = cornerColor,
+                            shape = RoundedCornerShape(bottomStart = 8.dp)))
+                    Box(modifier = Modifier.size(cornerSize).align(Alignment.BottomEnd)
+                        .border(width = cornerWidth, color = cornerColor,
+                            shape = RoundedCornerShape(bottomEnd = 8.dp)))
+                }
+            }
+
+            // HUD inferior
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -154,12 +214,15 @@ fun ScannerScreen() {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (scanMode == ScanMode.QR) {
-                    Text(text = "📱 [QR Detectado]: $detectedQrCode", color = Color.Green)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "🔍 [OCR Texto]: $detectedOcrText", color = Color.White)
+                    Text(
+                        text = if (qrDetectado.isNotBlank()) "QR detectado, procesando..."
+                        else "Centra el codigo QR en el recuadro",
+                        color = if (qrDetectado.isNotBlank()) Color(0xFF4CAF50) else Color.White,
+                        fontSize = 14.sp
+                    )
                 } else {
                     Text(
-                        text = "Apunta la cámara al documento y toma la foto",
+                        text = "Apunta la camara al documento y toma la foto",
                         color = Color.White,
                         fontSize = 14.sp
                     )
@@ -169,10 +232,12 @@ fun ScannerScreen() {
                             procesandoFoto = true
                             tomarFotoYProcesar(
                                 imageCapture = imageCaptureUseCase,
-                                context = context,
-                                onResultado = { textoOcr ->
+                                context      = context,
+                                onResultado  = { textoOcr ->
                                     procesandoFoto = false
-                                    Log.d("OCR_FOTO", "Texto extraído: $textoOcr")
+                                    ScannerResultHolder.textoOcr = textoOcr
+                                    ScannerResultHolder.textoQr  = ""
+                                    onNavigarResultado()
                                 },
                                 onError = {
                                     procesandoFoto = false
@@ -181,18 +246,16 @@ fun ScannerScreen() {
                             )
                         },
                         enabled = !procesandoFoto,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF2980B9)
-                        )
+                        colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF2980B9))
                     ) {
                         if (procesandoFoto) {
                             CircularProgressIndicator(
-                                color = Color.White,
-                                modifier = Modifier.size(20.dp),
+                                color       = Color.White,
+                                modifier    = Modifier.size(20.dp),
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Text("📷 Tomar Foto", color = Color.White)
+                            Text("Tomar Foto", color = Color.White)
                         }
                     }
                 }
@@ -200,48 +263,34 @@ fun ScannerScreen() {
 
         } else {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = "Se requiere permiso de la cámara para escanear.")
+                Text(text = "Se requiere permiso de la camara para escanear.")
             }
         }
     }
 }
 
-// ── Función original conservada ──
 @SuppressLint("UnsafeOptInUsageError")
-private fun processImageProxy(
+private fun procesarQR(
     imageProxy: ImageProxy,
-    ocrRecognizer: com.google.mlkit.vision.text.TextRecognizer,
     barcodeScanner: com.google.mlkit.vision.barcode.BarcodeScanner,
-    onQrDetected: (String) -> Unit,
-    onTextDetected: (String) -> Unit
+    onQrDetected: (String) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-
         barcodeScanner.process(image)
             .addOnSuccessListener { barcodes ->
                 for (barcode in barcodes) {
-                    barcode.rawValue?.let { qrValue -> onQrDetected(qrValue) }
+                    barcode.rawValue?.let { onQrDetected(it) }
                 }
             }
-            .addOnFailureListener { Log.e("MLKit_QR", "Error al leer QR", it) }
-
-        ocrRecognizer.process(image)
-            .addOnSuccessListener { visionText ->
-                if (visionText.text.isNotBlank()) {
-                    val shortText = visionText.text.lines().take(3).joinToString(" | ")
-                    onTextDetected(shortText)
-                }
-            }
-            .addOnFailureListener { Log.e("MLKit_OCR", "Error en OCR", it) }
+            .addOnFailureListener { Log.e("MLKit_QR", "Error QR", it) }
             .addOnCompleteListener { imageProxy.close() }
     } else {
         imageProxy.close()
     }
 }
 
-// ── Nueva función — toma foto estática y procesa OCR ──
 private fun tomarFotoYProcesar(
     imageCapture: ImageCapture?,
     context: android.content.Context,
@@ -253,30 +302,36 @@ private fun tomarFotoYProcesar(
         return
     }
 
-    val ocrRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    val archivoTemp = File(context.cacheDir, "ocr_${System.currentTimeMillis()}.jpg")
+    val outputOptions = ImageCapture.OutputFileOptions.Builder(archivoTemp).build()
 
     imageCapture.takePicture(
+        outputOptions,
         ContextCompat.getMainExecutor(context),
-        object : ImageCapture.OnImageCapturedCallback() {
-            @SuppressLint("UnsafeOptInUsageError")
-            override fun onCaptureSuccess(image: ImageProxy) {
-                val mediaImage = image.image
-                if (mediaImage != null) {
-                    val inputImage = InputImage.fromMediaImage(
-                        mediaImage,
-                        image.imageInfo.rotationDegrees
+        object : ImageCapture.OnImageSavedCallback {
+            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                try {
+                    val bitmap = BitmapFactory.decodeFile(archivoTemp.absolutePath)
+                    if (bitmap == null) {
+                        onError(Exception("No se pudo leer la imagen guardada"))
+                        return
+                    }
+                    ScannerResultHolder.imagenBitmap = bitmap
+
+                    val inputImage = InputImage.fromFilePath(
+                        context,
+                        android.net.Uri.fromFile(archivoTemp)
                     )
-                    ocrRecognizer.process(inputImage)
-                        .addOnSuccessListener { visionText ->
-                            onResultado(visionText.text)
-                        }
+                    TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        .process(inputImage)
+                        .addOnSuccessListener { visionText -> onResultado(visionText.text) }
                         .addOnFailureListener { onError(it) }
-                        .addOnCompleteListener { image.close() }
-                } else {
-                    image.close()
-                    onError(Exception("Imagen vacía"))
+                        .addOnCompleteListener { archivoTemp.delete() }
+                } catch (e: Exception) {
+                    onError(e)
                 }
             }
+
             override fun onError(exception: ImageCaptureException) {
                 onError(exception)
             }

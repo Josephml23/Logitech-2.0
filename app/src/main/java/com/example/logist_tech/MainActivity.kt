@@ -16,6 +16,8 @@ import com.example.logist_tech.auth.LoginScreen
 import com.example.logist_tech.auth.SessionManager
 import com.example.logist_tech.history.HistoryScreen
 import com.example.logist_tech.inventory.InventarioScreen
+import com.example.logist_tech.ocr.OcrResultScreen
+import com.example.logist_tech.scanner.ScannerResultHolder
 import com.example.logist_tech.scanner.ScannerScreen
 import com.example.logist_tech.ui.screens.HomeScreen
 import com.example.logist_tech.ui.theme.Logist_TechTheme
@@ -32,6 +34,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val navController = rememberNavController()
                     val startDestination = if (SessionManager.estaLogueado()) "home" else "login"
+
                     NavHost(
                         navController = navController,
                         startDestination = startDestination
@@ -59,7 +62,25 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
-                        composable("scanner") { ScannerScreen() }
+                        composable("scanner") {
+                            ScannerScreen(
+                                onNavigarResultado = {
+                                    navController.navigate("ocr_result")
+                                }
+                            )
+                        }
+                        composable("ocr_result") {
+                            OcrResultScreen(
+                                textoOcr        = ScannerResultHolder.textoOcr,
+                                textoQr         = ScannerResultHolder.textoQr,
+                                imagenCapturada = ScannerResultHolder.imagenBitmap,
+                                onRegistrarEnInventario = {
+                                    navController.navigate("inventory") {
+                                        popUpTo("scanner") { inclusive = true }
+                                    }
+                                }
+                            )
+                        }
                         composable("inventory") {
                             InventarioScreen(onNavigateBack = { navController.popBackStack() })
                         }
