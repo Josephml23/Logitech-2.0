@@ -34,6 +34,7 @@ private val AzulLogis  = Color(0xFF2980B9)
 private val AzulOscuro = Color(0xFF123B6D)
 private val FondoBlanco = Color(0xFFFFFFFF)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(onNavigateBack: () -> Unit = {}) {
 

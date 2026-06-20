@@ -25,94 +25,66 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.*
 import com.example.logist_tech.R
 import com.example.logist_tech.auth.SessionManager
 import com.example.logist_tech.auth.SessionManager.Rol
-import com.example.logist_tech.anomalias.AnomaliaManager
 
 @Composable
 fun HomeScreen(
     onNavigateScanner: () -> Unit = {},
     onNavigateInventory: () -> Unit = {},
     onNavigateHistory: () -> Unit = {},
-    onNavigateAnomalies: () -> Unit = {},
+    onNavigateNotifications: () -> Unit = {},
+    onNavigateMisCajas: () -> Unit = {},
+    onNavigateDashboard: () -> Unit = {},
+    onNavigatePerfil: () -> Unit = {},
     onLogout: () -> Unit = {}
 ) {
-    var rol by remember { mutableStateOf(SessionManager.rol) }
+    val rol = SessionManager.rol
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFFFFFFF))
-            .padding(horizontal = 30.dp, vertical = 16.dp),
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Cabecera con saludo y logout
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Column {
+                Text("Bienvenido,", color = Color.Gray, fontSize = 14.sp)
+                Text(SessionManager.nombreUsuario, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF2980B9))
+            }
             IconButton(onClick = { onLogout() }) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Logout,
-                    contentDescription = "Cerrar sesion",
-                    tint = Color(0xFF2980B9)
-                )
+                Icon(imageVector = Icons.AutoMirrored.Filled.Logout, contentDescription = "Cerrar sesion", tint = Color(0xFF2980B9))
             }
         }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_logo_logis),
-                contentDescription = "LogisTech Logo",
-                modifier = Modifier.size(280.dp)
-            )
-        }
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(20.dp))
-
+        // Grid de Opciones
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.weight(1f)
         ) {
-            if (rol == Rol.DESPACHO) {
-                item {
-                    MenuCard(
-                        title = "Escaner IA",
-                        icon = Icons.Filled.CameraAlt,
-                        onClick = onNavigateScanner
-                    )
-                }
-            }
-
-            item {
-                MenuCard(
-                    title = "Inventario",
-                    icon = Icons.Filled.Inventory,
-                    onClick = onNavigateInventory
-                )
-            }
-
-            if (rol == Rol.DESPACHO) {
-                item {
-                    MenuCard(
-                        title = "Historial",
-                        icon = Icons.Filled.History,
-                        onClick = onNavigateHistory
-                    )
-                }
-            }
-
-            item {
-                val totalAnomalias = AnomaliaManager.totalAnomalias()
-                MenuCard(
-                    title = "Anomalias",
-                    icon = Icons.Filled.Warning,
-                    onClick = onNavigateAnomalies,
-                    badgeCount = totalAnomalias
-                )
+            if (rol == Rol.CLIENTE) {
+                // MENÚ CLIENTE
+                item { MenuCard("Registrar Caja", Icons.Filled.AddBox, onNavigateScanner) }
+                item { MenuCard("Mis Cajas", Icons.Filled.Inventory2, onNavigateMisCajas) }
+                item { MenuCard("Alertas", Icons.Filled.Notifications, onNavigateNotifications) }
+                item { MenuCard("Editar Perfil", Icons.Filled.Person, onNavigatePerfil) }
+            } else {
+                // MENÚ OPERARIO
+                item { MenuCard("Escanear / Cambiar", Icons.Filled.QrCodeScanner, onNavigateScanner) }
+                item { MenuCard("Dashboard Vivo", Icons.Filled.Dashboard, onNavigateDashboard) }
+                item { MenuCard("Mi Historial", Icons.Filled.History, onNavigateHistory) }
             }
         }
     }

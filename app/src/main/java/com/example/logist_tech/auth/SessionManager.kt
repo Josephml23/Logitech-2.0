@@ -2,7 +2,13 @@
 
 object SessionManager {
 
-    enum class Rol { DESPACHO, BANDA }
+    enum class Rol { 
+        CLIENTE, 
+        RECEPTOR_ENTRADA, 
+        ORGANIZADOR_ENTRADA, 
+        ORGANIZADOR_SALIDA, 
+        RECEPTOR_SALIDA 
+    }
 
     var usuarioId: String = ""
         private set
@@ -10,19 +16,19 @@ object SessionManager {
     var nombreUsuario: String = ""
         private set
 
-    var rol: Rol = Rol.DESPACHO
+    var rol: Rol = Rol.CLIENTE
         private set
 
     fun login(id: String, nombre: String, rolSeleccionado: Rol) {
-        usuarioId = id
-        nombreUsuario = nombre
+        usuarioId = id.trim().lowercase() // Normalización a minúsculas
+        nombreUsuario = nombre.trim()
         rol = rolSeleccionado
     }
 
     fun logout() {
         usuarioId = ""
         nombreUsuario = ""
-        rol = Rol.DESPACHO
+        rol = Rol.CLIENTE
     }
 
     fun estaLogueado(): Boolean = usuarioId.isNotEmpty()
